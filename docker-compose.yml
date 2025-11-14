@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # Local PostgreSQL for development (comment out for production)
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: postgres-pgvector
+    environment:
+      POSTGRES_DB: ${RDS_DB:-rag_db}
+      POSTGRES_USER: ${RDS_USER:-postgres}
+      POSTGRES_PASSWORD: ${RDS_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./rag/setup_pgvector.sql:/docker-entrypoint-initdb.d/setup.sql
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RDS_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rag-api:
+    build:
+      context: ./rag
+      dockerfile: Dockerfile
+    image: ${ECR_REGISTRY:-local}/rag-api:${IMAGE_TAG:-latest}
+    container_name: rag-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - RDS_HOST=${RDS_HOST:-postgres}
+      - RDS_DB=${RDS_DB:-rag_db}
+      - RDS_USER=${RDS_USER:-postgres}
+      - RDS_PASSWORD=${RDS_PASSWORD:-password}
+      - RDS_PORT=${RDS_PORT:-5432}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    networks:
+      - rag-network
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  chatbot:
+    image: ${ECR_REGISTRY}/chatbot:${IMAGE_TAG:-latest}
+    container_name: chatbot
+    ports:
+      - "8501:8501"
+    environment:
+      - RAG_API_BASE_URL=http://rag-api:8000
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - RDS_HOST=${RDS_HOST}
+      - RDS_DB=${RDS_DB}
+      - RDS_USER=${RDS_USER}
+      - RDS_PASSWORD=${RDS_PASSWORD}
+      - RDS_PORT=${RDS_PORT:-5432}
+    networks:
+      - rag-network
+    restart: unless-stopped
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+

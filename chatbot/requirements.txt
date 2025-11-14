@@ -1,0 +1,7 @@
+streamlit==1.44.1
+requests
+openai
+psycopg2-binary
+pydantic-settings
+sqlalchemy
+
